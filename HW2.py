@@ -23,13 +23,16 @@ test_label_arr = []
 p_classes = []
 var_arr = []
 mean_arr = []
+bin_prob_arr = []
 classes = []
+is_conti = False
 nImg = 0
 nRow = 0
 nCol = 0
 
 # open MNIST
 def open_img(filename):
+    global nImg,nRow,nCol
     with open(filename,'rb') as imagesfile:
         imagesfile.seek(0)
         magic = st.unpack('>4B',imagesfile.read(4))
@@ -50,7 +53,6 @@ def open_label(filename):
 def load():
     global train_img_arr,train_label_arr
     global test_img_arr,test_label_arr
-    global nImg,nRow,nCol
     
     train_img_arr = open_img(filename['images'])
     train_label_arr = open_label(filename['labels'])
@@ -71,19 +73,25 @@ def im_show(img,label):
 
 # naive bayes
 def dis_naive_bayes():
-    global p_classes,mean_arr,var_arr,classes
+    global bin_prob_arr
+    w,h = train_img_arr[0].shape
+    bin_prob_arr = np.zeros((len(classes),32,w*h))
+    print(bin_prob_arr.shape)
+    # calc 32 bin probability of every label
+    for i,c in enumerate(classes):
+        c_idxes = np.where(train_label_arr == c)
+        c_imgs = train_img_arr[c_idxes]
+        for img in c_imgs:
+            hist , bin = np.histogram(img,bins = range(0,257,8))
+            # add min value avoid bin equal to 0
+            for j,h in enumerate(hist):
+                bin_prob_arr[i][j][h] += 1
+    bin_prob_arr[bin_prob_arr == 0] = 1
+    for i,c in enumerate(classes):
+        bin_prob_arr[i] = np.log(bin_prob_arr[i] / bin_prob_arr[i].sum())
 
 def conti_naive_bayes():
-    global p_classes,mean_arr,var_arr,classes
-    #Find the Unique Classes in the Data
-    classes,counts=np.unique(train_label_arr,return_counts=True)
-    #Number of Classes in the Data
-    n_class=len(classes)
-    print(nImg," ",nRow," ",nCol)
-    print("Class num : ",n_class,"\n",counts)
-    # calc P(class)
-    p_classes = counts / len(train_label_arr)
-    print(p_classes)
+    global mean_arr,var_arr
     # calc mean & varance of every label
     for c in classes:
         c_idxes = np.where(train_label_arr == c)
@@ -99,56 +107,79 @@ def conti_naive_bayes():
     var_arr = np.array(var_arr) + 1000
 
 def naive_bayes(is_continuous):
+    global p_classes,classes
+    #Find the Unique Classes in the Data
+    classes,counts=np.unique(train_label_arr,return_counts=True)
+    #Number of Classes in the Data
+    n_class=len(classes)
+    print("MNIST info : ",nImg," ",nRow," ",nCol)
+    print("Class num : ",n_class,"\n",counts)
+    # calc P(class)
+    p_classes = counts / len(train_label_arr)
+    print(p_classes)
     if is_continuous:
         conti_naive_bayes()
     else:
         dis_naive_bayes()
 
-def predict():
+def predict(is_continuous):
     result = []
-    for i,img in enumerate(test_img_arr):
-        # calc P(image | class)
-        c_prob = np.zeros(len(classes))
-        for i,c in enumerate(classes):
-            var = var_arr[i]
-            mean = mean_arr[i]
-            ratio = 1 / np.sqrt(2 * np.pi * var) * np.exp(-np.square(img - mean)/(2 * var))
-            ratio = np.sum(np.log(ratio))
-            c_prob[i] = ratio
-            # break
-        idx = np.argmax(c_prob)
-        result.append(classes[idx])
+    c_prob = np.zeros(len(classes))
+    if is_continuous:
+        for i,img in enumerate(test_img_arr):
+            # calc P(image | class)
+            for i,c in enumerate(classes):
+                var = var_arr[i]
+                mean = mean_arr[i]
+                ratio = 1 / np.sqrt(2 * np.pi * var) * np.exp(-np.square(img - mean)/(2 * var))
+                ratio = np.sum(np.log(ratio))
+                c_prob[i] = ratio
+                # break
+            idx = np.argmax(c_prob)
+            result.append(classes[idx])
+    else:
+        for i,img in enumerate(test_img_arr):
+            hist , bin = np.histogram(img,bins = range(0,257,8))
+            # calc P(image | class)
+            for i,c in enumerate(classes):
+                for j,h in enumerate(hist):
+                    c_prob[i] += bin_prob_arr[i][j][h]
+            idx = np.argmax(c_prob)
+            result.append(classes[idx])
     return np.array(result)
 
 def error(pred,truth):
-    return np.sum(pred == truth) / len(truth)
+    return 1 - np.sum(pred == truth) / len(truth)
 
 # wrong!!
-def draw_pred(class_idx):
-    cls = classes[class_idx]
-    var = var_arr[class_idx]
-    mean = mean_arr[class_idx]
+def draw_pred(is_continuous,class_idx):
     img = np.zeros_like(test_img_arr[0])
-    for i,pix in np.ndenumerate(img):
-        p_black = 0
-        p_white = 0
-        for color in range(0,128):
-            prob = 1 / np.sqrt(2 * np.pi * var[i]) * np.exp(-np.square(color - mean[i])/(2 * var[i]))
-            p_black += prob
-        for color in range(128,256):
-            prob = 1 / np.sqrt(2 * np.pi * var[i]) * np.exp(-np.square(color - mean[i])/(2 * var[i]))
-            p_white += prob
-        if p_white > p_black:
-            img[i] = 1
+    if is_continuous:
+        cls = classes[class_idx]
+        var = var_arr[class_idx]
+        mean = mean_arr[class_idx]
+        for i,pix in np.ndenumerate(img):
+            p_black = 0
+            p_white = 0
+            for color in range(0,128):
+                prob = 1 / np.sqrt(2 * np.pi * var[i]) * np.exp(-np.square(color - mean[i])/(2 * var[i]))
+                p_black += prob
+            for color in range(128,256):
+                prob = 1 / np.sqrt(2 * np.pi * var[i]) * np.exp(-np.square(color - mean[i])/(2 * var[i]))
+                p_white += prob
+            if p_white > p_black:
+                img[i] = 1
+    else:
+        return
     print(img)
     im_show(img,cls)
 
 # main
 load()
-naive_bayes(True)
-res = predict()
+naive_bayes(is_conti)
+res = predict(is_conti)
 if is_test:
     print(res,test_label_arr)
-print(error(res,test_label_arr))
-draw_pred(1)
+print("Error rate:",error(res,test_label_arr))
+draw_pred(is_conti,9)
 # im_show(train_img_arr[1],train_label_arr[0])
