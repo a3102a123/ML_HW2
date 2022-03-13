@@ -1,20 +1,23 @@
-from cProfile import label
 import struct as st
-from cv2 import sqrt
 import numpy as np
 import matplotlib.pyplot as plt
-from sympy import factor
+import math
+
+from sqlalchemy import true
 
 is_test = True
+is_conti = False
 # global variable
 if not is_test:
     filename = {'images' : 'train-images.idx3-ubyte' ,\
                 'labels' : 'train-labels.idx1-ubyte' ,\
                 'test_img' : 't10k-images.idx3-ubyte' ,\
-                'test_labels' : 't10k-labels.idx1-ubyte'}
+                'test_labels' : 't10k-labels.idx1-ubyte',\
+                'online_test' : 'testfile.txt'}
 else:
     filename = {'images' : 't10k-images.idx3-ubyte' ,\
-                'labels' : 't10k-labels.idx1-ubyte'}
+                'labels' : 't10k-labels.idx1-ubyte',\
+                'online_test' : 'testfile.txt'}
 
 train_img_arr = []
 train_label_arr = []
@@ -25,10 +28,60 @@ var_arr = []
 mean_arr = []
 bin_prob_arr = []
 classes = []
-is_conti = False
 nImg = 0
 nRow = 0
 nCol = 0
+
+# math tool
+def C(N,m):
+    return math.factorial(N)/(math.factorial(m) * math.factorial(N - m))
+
+def gamma(n):
+    if n == 1 or n == 2:
+        return 1
+    else:
+        return math.factorial(n - 1)
+
+def beta(a,b,p):
+        return p**(a - 1) * (1 - p)**(b - 1) * gamma(a+b) / (gamma(a) * gamma(b))
+
+# beta
+class Beta:
+    def __init__(self,a,b):
+        self.a = a
+        self.b = b
+        self.p = -1
+
+    def beta(self):
+        return beta(self.a,self.b,self.p)
+
+    def likelihood(self,N,m):
+        # The probability of beservation
+        self.p = m / N
+        return C(N,m) * self.p**m * (1 - self.p)**(N - m)
+
+    def prior(self):
+        return
+
+    def update(self,N,m):
+        print("Beta prior:     a = {} b = {}".format(self.a,self.b))
+        self.a += m
+        self.b += (N - m)
+        print("Beta posterior: a = {} b = {}\n".format(self.a,self.b))
+
+def online_learning(a,b):
+    online = Beta(a,b)
+    # load test file
+    with open(filename['online_test'],'r') as f:
+        lines = f.readlines()
+    for i,line in enumerate(lines):
+        line = line.strip()
+        N,m = len(line),line.count("1")
+        print("case {}: {}".format(i + 1,line))
+        print("Likelihood: {}".format(online.likelihood(N,m)))
+        online.update(N,m)
+        # if i == 1:
+        #     break
 
 # open MNIST
 def open_img(filename):
@@ -75,20 +128,20 @@ def im_show(img,label):
 def dis_naive_bayes():
     global bin_prob_arr
     w,h = train_img_arr[0].shape
-    bin_prob_arr = np.zeros((len(classes),32,w*h))
+    bin_prob_arr = np.zeros((len(classes),w,h,32))
     print(bin_prob_arr.shape)
     # calc 32 bin probability of every label
     for i,c in enumerate(classes):
         c_idxes = np.where(train_label_arr == c)
         c_imgs = train_img_arr[c_idxes]
-        for img in c_imgs:
-            hist , bin = np.histogram(img,bins = range(0,257,8))
+        hist , bin = np.apply_along_axis(lambda a: np.histogram(a, bins=range(0,257,8)), 0, c_imgs)
+        for pix,h in np.ndenumerate(hist):
             # add min value avoid bin equal to 0
-            for j,h in enumerate(hist):
-                bin_prob_arr[i][j][h] += 1
-    bin_prob_arr[bin_prob_arr == 0] = 1
-    for i,c in enumerate(classes):
-        bin_prob_arr[i] = np.log(bin_prob_arr[i] / bin_prob_arr[i].sum())
+            h[h == 0] = 1
+            t = h.sum()
+            h = np.log(h / h.sum())
+            bin_prob = bin_prob_arr[i]
+            bin_prob[pix[0],pix[1],:] = h
 
 def conti_naive_bayes():
     global mean_arr,var_arr
@@ -139,11 +192,11 @@ def predict(is_continuous):
             result.append(classes[idx])
     else:
         for i,img in enumerate(test_img_arr):
-            hist , bin = np.histogram(img,bins = range(0,257,8))
             # calc P(image | class)
             for i,c in enumerate(classes):
-                for j,h in enumerate(hist):
-                    c_prob[i] += bin_prob_arr[i][j][h]
+                for pix,color in np.ndenumerate(img):
+                    bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
+                    c_prob[i] += bin_prob_arr[i,pix[0],pix[1],bin_idx]
             idx = np.argmax(c_prob)
             result.append(classes[idx])
     return np.array(result)
@@ -151,11 +204,10 @@ def predict(is_continuous):
 def error(pred,truth):
     return 1 - np.sum(pred == truth) / len(truth)
 
-# wrong!!
 def draw_pred(is_continuous,class_idx):
     img = np.zeros_like(test_img_arr[0])
+    cls = classes[class_idx]
     if is_continuous:
-        cls = classes[class_idx]
         var = var_arr[class_idx]
         mean = mean_arr[class_idx]
         for i,pix in np.ndenumerate(img):
@@ -170,16 +222,38 @@ def draw_pred(is_continuous,class_idx):
             if p_white > p_black:
                 img[i] = 1
     else:
-        return
+        bin_prob = bin_prob_arr[class_idx]
+        for i,pix in np.ndenumerate(img):
+            p_black = 0
+            p_white = 0
+            for color in range(0,128):
+                bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
+                prob = bin_prob[i[0],i[1],bin_idx]
+                p_black += prob
+            for color in range(128,256):
+                bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
+                prob = bin_prob[i[0],i[1],bin_idx]
+                p_white += prob
+            if p_white > p_black:
+                img[i] = 1
     print(img)
     im_show(img,cls)
 
 # main
+# Naive bayes
 load()
 naive_bayes(is_conti)
 res = predict(is_conti)
 if is_test:
     print(res,test_label_arr)
 print("Error rate:",error(res,test_label_arr))
-draw_pred(is_conti,9)
+# for i in range(0,10):
+#     draw_pred(is_conti,i)
 # im_show(train_img_arr[1],train_label_arr[0])
+exit()
+# Online learning
+print("Input a of beta prior : ")
+a = int(input())
+print("Input b of beta prior : ")
+b = int(input())
+online_learning(a,b)
