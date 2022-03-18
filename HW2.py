@@ -5,9 +5,14 @@ import math
 
 from sqlalchemy import true
 
-is_test = True
+# control parameter
+is_test = False
 is_conti = True
-skip_test = True
+skip_pred = False
+# < 0 to print all test case
+print_case_num = 3
+test_num = 200
+
 # global variable
 if not is_test:
     filename = {'images' : 'train-images.idx3-ubyte' ,\
@@ -113,8 +118,8 @@ def load():
     
 
     if is_test:
-        test_img_arr = train_img_arr[0:10]
-        test_label_arr = train_label_arr[0:10]
+        test_img_arr = train_img_arr[0:test_num]
+        test_label_arr = train_label_arr[0:test_num]
     else:
         test_img_arr = open_img(filename['test_img'])
         test_label_arr = open_label(filename['test_labels'])
@@ -123,10 +128,9 @@ def load():
     print("Test img num : ",len(test_label_arr))
 
 # show the image
-def im_show(img,label):
-    plt.title('Label is {label}'.format(label=label))
-    plt.imshow(img, cmap='gray')
-    plt.show()
+def im_show(img,label,ax):
+    ax.set_title('Label is {label}'.format(label=label))
+    ax.imshow(img, cmap='gray')
 
 # naive bayes
 def dis_naive_bayes():
@@ -160,8 +164,6 @@ def conti_naive_bayes():
         var = np.var(c_imgs,axis=0)
         mean_arr.append(mean)
         var_arr.append(var)
-        print(c,len(c_idxes[0]),c_imgs.shape,np.shape(var))
-        print(c_imgs[:].shape)
     mean_arr = np.array(mean_arr)
     # smooth the var to eliminate the zero value
     var_arr = np.array(var_arr) + 1000
@@ -173,10 +175,10 @@ def naive_bayes(is_continuous):
     #Number of Classes in the Data
     n_class=len(classes)
     print("MNIST info : ",nImg," ",nRow," ",nCol)
-    print("Class num : ",n_class,"\n",counts)
+    print("Class num : ",n_class,"\n")
     # calc P(class)
     p_classes = counts / len(train_label_arr)
-    print(p_classes)
+    print("P(Class) : ",p_classes)
     if is_continuous:
         conti_naive_bayes()
     else:
@@ -199,30 +201,33 @@ def predict(is_continuous):
             result.append(classes[idx])
             # print result probability
             c_prob = c_prob / c_prob.sum()
-            # for j,p in enumerate(c_prob):
-            #     print("{}: {}".format(j,p))
-            # print("Prediction: {}, Ans: {}\n".format(result[i],test_label_arr[i]))
+            if i < print_case_num or print_case_num < 0:
+                for j,p in enumerate(c_prob):
+                    print("{}: {}".format(j,p))
+                print("Prediction: {}, Ans: {}\n".format(result[i],test_label_arr[i]))
     else:
         for i,img in enumerate(test_img_arr):
+            img = np.digitize(img, bins=range(0,257,8)) - 1
             # calc P(image | class)
             for j,c in enumerate(classes):
                 for pix,color in np.ndenumerate(img):
-                    bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
+                    bin_idx = color
                     c_prob[j] += bin_prob_arr[j,pix[0],pix[1],bin_idx]
             idx = np.argmax(c_prob)
             result.append(classes[idx])
             # print result probability
             c_prob = c_prob / c_prob.sum()
-            # for j,p in enumerate(c_prob):
-            #     print("{}: {}".format(j,p))
-            # print("Prediction: {}, Ans: {}\n".format(result[i],test_label_arr[i]))
+            if i < print_case_num or print_case_num < 0:
+                for j,p in enumerate(c_prob):
+                    print("{}: {}".format(j,p))
+                print("Prediction: {}, Ans: {}\n".format(result[i],test_label_arr[i]))
     
     return np.array(result)
 
 def error(pred,truth):
     return 1 - np.sum(pred == truth) / len(truth)
 
-def draw_pred(is_continuous,class_idx):
+def draw_pred(is_continuous,class_idx,ax):
     img = np.zeros_like(test_img_arr[0])
     color_prob = np.zeros(256)
     cls = classes[class_idx]
@@ -254,21 +259,26 @@ def draw_pred(is_continuous,class_idx):
             if p_white > p_black:
                 img[i] = 1
     print(img)
-    im_show(img,cls)
+    im_show(img,cls,ax)
 
 # main
 # Naive bayes
 load()
 naive_bayes(is_conti)
-if skip_test:
+if not skip_pred:
     res = predict(is_conti)
     if is_test:
         print(res,test_label_arr)
     print("Error rate:",error(res,test_label_arr))
-for i in range(0,10):
-    draw_pred(is_conti,i)
+# draw imagnation of model
+fig, axs = plt.subplots(2, 5)
+for i in range(0,2):
+    for j in range(0,5):
+        num = i*5+j
+        draw_pred(is_conti,num,axs[i,j])
 # draw_pred(is_conti,4)
-exit()
+plt.show()
+
 # Online learning
 print("Input a of beta prior : ")
 a = int(input())
