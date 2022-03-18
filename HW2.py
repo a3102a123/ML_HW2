@@ -3,8 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 
-from sqlalchemy import true
-
 # control parameter
 is_test = False
 is_conti = True
@@ -239,25 +237,35 @@ def draw_pred(is_continuous,class_idx,ax):
                 prob = 1 / np.sqrt(2 * np.pi * var[i]) * np.exp(-np.square(color - mean[i])/(2 * var[i]))
                 color_prob[color] = prob
             color_prob = color_prob / color_prob.sum()
-            p_black = color_prob[0:128].sum()
-            p_white = color_prob[128:].sum()
-            if p_white > p_black:
+            if np.argmax(color_prob) >= 128:
                 img[i] = 1
+            # accumulate the probability of 0~127 & 128~255 and then compare with them
+            # p_black = color_prob[0:128].sum()
+            # p_white = color_prob[128:].sum()
+            # if p_white > p_black:
+            #     img[i] = 1
     else:
         bin_prob = bin_prob_arr[class_idx]
         for i,pix in np.ndenumerate(img):
-            p_black = 0
-            p_white = 0
-            for color in range(0,128):
+            for color in range(0,256):
                 bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
                 prob = bin_prob[i[0],i[1],bin_idx]
-                p_black += prob
-            for color in range(128,256):
-                bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
-                prob = bin_prob[i[0],i[1],bin_idx]
-                p_white += prob
-            if p_white > p_black:
-                img[i] = 1
+                color_prob[color] = prob
+                if np.argmax(color_prob) >= 128:
+                    img[i] = 1
+            # accumulate the probability of 0~127 & 128~255 and then compare with them
+            # p_black = 0
+            # p_white = 0
+            # for color in range(0,128):
+            #     bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
+            #     prob = bin_prob[i[0],i[1],bin_idx]
+            #     p_black += prob
+            # for color in range(128,256):
+            #     bin_idx = np.digitize(color, bins=range(0,257,8)) - 1
+            #     prob = bin_prob[i[0],i[1],bin_idx]
+            #     p_white += prob
+            # if p_white > p_black:
+            #     img[i] = 1
     print(img)
     im_show(img,cls,ax)
 
